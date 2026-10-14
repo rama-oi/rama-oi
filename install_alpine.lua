@@ -1,14 +1,11 @@
 #!/usr/bin/env lua5.4
 
+-- ============================================================
 -- Rama-OI
--- Alpine Linux x86 (32-bit) | Minimal Xorg + i3
--- Usage:
---   lua5.4 install_alpine.lua install
---   lua5.4 install_alpine.lua apply
---   lua5.4 install_alpine.lua check
---   lua5.4 install_alpine.lua uninstall
+-- Alpine Linux x86 (32-bit) | Minimal Xorg + i3 | Coqui
+-- ============================================================
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 
 local HOME = assert(os.getenv("HOME"), "HOME is not set")
 local USER = assert(os.getenv("USER"), "USER is not set")
@@ -16,7 +13,194 @@ local USER = assert(os.getenv("USER"), "USER is not set")
 local ROOT = HOME .. "/.local/share/rama-oi"
 local CONFIG = ROOT .. "/config"
 local BIN = ROOT .. "/bin"
+local SRC = ROOT .. "/src"
 local LOCAL_BIN = HOME .. "/.local/bin"
+
+local COQUI_REPO = "https://github.com/rama-oi/coqui.git"
+local COQUI_REV = "cb4c3353f41d4a1c536cd927ad03338a7498d632"
+
+local COQUI_DIR = SRC .. "/coqui"
+local COQUI_BIN = BIN .. "/coqui"
+
+-- ============================================================
+-- Theme
+-- ============================================================
+
+local theme = {
+    name = "catppuccin-mocha",
+
+    colors = {
+        bg = "#1e1e2e",
+        bg_dark = "#11111b",
+        bg_alt = "#313244",
+        fg = "#cdd6f4",
+        muted = "#a6adc8",
+        accent = "#cba6f7",
+        blue = "#89b4fa",
+        danger = "#f38ba8",
+        warning = "#fab387",
+        success = "#a6e3a1",
+    },
+
+    font = {
+        family = "DejaVu Sans Mono",
+        size = 9,
+    },
+
+    spacing = {
+        inner = 4,
+        outer = 2,
+    },
+}
+
+-- ============================================================
+-- Package definitions
+-- ============================================================
+
+local packages = {
+    desktop = {
+        "xorg-server",
+        "xinit",
+        "xauth",
+        "dbus",
+        "dbus-x11",
+        "i3wm",
+        "i3status",
+        "dmenu",
+        "xterm",
+        "font-dejavu",
+        "xf86-input-libinput",
+        "mesa",
+        "caja",
+        "dunst",
+        "libnotify",
+        "mousepad",
+    },
+
+    build = {
+        "build-base",
+        "git",
+        "curl",
+        "ca-certificates",
+        "pkgconf",
+        "linux-headers",
+        "libx11-dev",
+        "libxkbcommon-dev",
+        "openssl-dev",
+        "zlib-dev",
+    },
+
+    utilities = {
+        "less",
+        "nano",
+        "mc",
+        "tree",
+        "unzip",
+        "zip",
+        "jq",
+        "btop",
+        "cmus",
+        "vlc",
+    },
+}
+
+local enabled_packages = {
+    "desktop",
+    "build",
+    "utilities",
+}
+
+-- ============================================================
+-- Application definitions
+-- ============================================================
+
+local applications = {
+    {
+        category = "Utilities",
+        label = "Terminal",
+        command = "xterm",
+        terminal = false,
+    },
+    {
+        category = "Utilities",
+        label = "Mousepad",
+        command = "mousepad",
+        terminal = false,
+    },
+    {
+        category = "Utilities",
+        label = "File Manager",
+        command = "caja",
+        terminal = false,
+    },
+    {
+        category = "Utilities",
+        label = "Midnight Commander",
+        command = "mc",
+        terminal = true,
+    },
+    {
+        category = "Utilities",
+        label = "Btop",
+        command = "btop",
+        terminal = true,
+    },
+    {
+        category = "Networking",
+        label = "Impala",
+        command = "impala",
+        terminal = true,
+        optional = true,
+    },
+    {
+        category = "Networking",
+        label = "Bluetui",
+        command = "bluetui",
+        terminal = true,
+        optional = true,
+    },
+    {
+        category = "Networking",
+        label = "Wiremix",
+        command = "wiremix",
+        terminal = true,
+        optional = true,
+    },
+    {
+        category = "Multimedia",
+        label = "Cmus",
+        command = "cmus",
+        terminal = true,
+    },
+    {
+        category = "Multimedia",
+        label = "VLC",
+        command = "vlc",
+        terminal = false,
+    },
+    {
+        category = "System",
+        label = "i3 Exit",
+        command = "i3-msg exit",
+        terminal = false,
+    },
+    {
+        category = "System",
+        label = "Reboot",
+        command = "reboot",
+        terminal = false,
+    },
+    {
+        category = "System",
+        label = "Shutdown",
+        command = "poweroff",
+        terminal = false,
+    },
+}
+
+-- ============================================================
+-- Helpers
+-- ============================================================
 
 local function log(message)
     print("\27[1;35m==>\27[0m " .. message)
@@ -55,7 +239,9 @@ local function run(args, quiet)
     end
 
     fail(("Command failed (%s, %s): %s"):format(
-        tostring(reason), tostring(code), command
+        tostring(reason),
+        tostring(code),
+        command
     ))
 end
 
@@ -74,12 +260,14 @@ end
 
 local function read_link(path)
     local handle = io.popen("readlink " .. quote(path) .. " 2>/dev/null")
+
     if not handle then
         return nil
     end
 
     local result = handle:read("*l")
     handle:close()
+
     return result
 end
 
@@ -111,12 +299,21 @@ local function read_file(path)
 
     local result = file:read("*a")
     file:close()
+
     return result
 end
 
--- ------------------------------------------------------------
+local function toml_quote(value)
+    value = value:gsub("\\", "\\\\")
+    value = value:gsub('"', '\\"')
+    value = value:gsub("\n", "\\n")
+
+    return '"' .. value .. '"'
+end
+
+-- ============================================================
 -- Privilege escalation
--- ------------------------------------------------------------
+-- ============================================================
 
 local PRIVILEGE
 
@@ -125,7 +322,7 @@ if succeeds("command -v doas") then
 elseif succeeds("command -v sudo") then
     PRIVILEGE = "sudo"
 else
-    fail("Neither doas nor sudo is installed. Run the bootstrap first.")
+    fail("Neither doas nor sudo is installed. Bootstrap one first.")
 end
 
 local function privileged(args)
@@ -138,9 +335,9 @@ local function privileged(args)
     run(command)
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Validation
--- ------------------------------------------------------------
+-- ============================================================
 
 local function validate()
     if not exists("/etc/alpine-release") then
@@ -170,41 +367,9 @@ local function validate()
     end
 end
 
--- ------------------------------------------------------------
--- Package groups
--- ------------------------------------------------------------
-
-local packages = {
-    desktop = {
-        "xorg-server",
-        "xinit",
-        "xauth",
-        "dbus",
-        "dbus-x11",
-        "i3wm",
-        "i3status",
-        "dmenu",
-        "xterm",
-        "font-dejavu",
-        "xf86-input-libinput",
-        "mesa"
-        "caja"
-    },
-
-    utilities = {
-        -- "git",
-        -- "curl",
-        -- "ca-certificates",
-        -- "mousepad",
-        "less",
-        "nano",
-        "mc",
-        "tree",
-        "unzip",
-        "zip",
-        "jq",
-    },
-}
+-- ============================================================
+-- Alpine repositories
+-- ============================================================
 
 local function enable_community()
     local release = read_file("/etc/alpine-release")
@@ -240,7 +405,8 @@ local function enable_community()
 
     if commented then
         privileged({
-            "sed", "-i",
+            "sed",
+            "-i",
             "/\\/community/s/^[[:space:]]*#//",
             path,
         })
@@ -260,15 +426,30 @@ local function enable_community()
     end
 end
 
+-- ============================================================
+-- Package management
+-- ============================================================
+
 local function install_packages()
     local selected = {}
+    local seen = {}
 
-    for _, group in ipairs({ "desktop", "utilities" }) do
-        for _, package in ipairs(packages[group]) do
-            selected[#selected + 1] = package
+    for _, group in ipairs(enabled_packages) do
+        local list = packages[group]
+
+        if not list then
+            fail("Unknown package group: " .. group)
+        end
+
+        for _, package in ipairs(list) do
+            if not seen[package] then
+                selected[#selected + 1] = package
+                seen[package] = true
+            end
         end
     end
 
+    log("Updating Alpine package indexes")
     privileged({ "apk", "update" })
 
     local args = { "apk", "add", "--no-cache" }
@@ -280,53 +461,196 @@ local function install_packages()
     privileged(args)
 end
 
--- ------------------------------------------------------------
--- OpenRC services and user groups
--- ------------------------------------------------------------
+-- ============================================================
+-- Rust toolchain: rustup + stable Rust + Cargo
+-- ============================================================
 
-local function configure_system()
-    privileged({ "rc-update", "add", "dbus", "default" })
+local function install_rust()
+    local cargo_home = HOME .. "/.cargo"
+    local cargo_bin = cargo_home .. "/bin"
+    local rustup = cargo_bin .. "/rustup"
+    local cargo = cargo_bin .. "/cargo"
+    local rustc = cargo_bin .. "/rustc"
 
-    local group_file = read_file("/etc/group") or ""
-    local known = {}
+    mkdir(cargo_bin)
 
-    for line in group_file:gmatch("[^\r\n]+") do
-        local name = line:match("^([^:]+):")
-        if name then
-            known[name] = true
+    if not exists(rustup) then
+        log("Installing rustup")
+
+        local installer = os.tmpname()
+
+        run({
+            "curl",
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "-fsSL",
+            "https://sh.rustup.rs",
+            "-o",
+            installer,
+        })
+
+        local ok, reason, code = os.execute(
+            "sh " .. quote(installer)
+            .. " -y --profile minimal"
+        )
+
+        os.remove(installer)
+
+        if ok ~= true then
+            fail(("rustup installation failed (%s, %s)"):format(
+                tostring(reason),
+                tostring(code)
+            ))
         end
     end
 
-    local handle = io.popen("id -nG " .. quote(USER))
-    local current = {}
-
-    if handle then
-        for group in (handle:read("*a") or ""):gmatch("%S+") do
-            current[group] = true
-        end
-        handle:close()
+    if not exists(rustup) then
+        fail("rustup is missing after installation.")
     end
 
-    for _, group in ipairs({ "input", "video", "audio" }) do
-        if known[group] and not current[group] then
-            privileged({ "addgroup", USER, group })
+    local path = cargo_bin .. ":" .. (os.getenv("PATH") or "")
+
+    local function rust_command(...)
+        local args = {
+            "env",
+            "PATH=" .. path,
+            rustup,
+        }
+
+        for _, value in ipairs({ ... }) do
+            args[#args + 1] = value
         end
+
+        run(args)
     end
+
+    log("Updating rustup")
+    rust_command("self", "update")
+
+    log("Installing or updating the stable Rust toolchain")
+    rust_command("toolchain", "install", "stable", "--profile", "minimal")
+    rust_command("default", "stable")
+    rust_command("update", "stable")
+
+    if not exists(cargo) or not exists(rustc) then
+        fail("Cargo or rustc is missing after Rust installation.")
+    end
+
+    run({
+        "env",
+        "PATH=" .. path,
+        cargo,
+        "--version",
+    })
+
+    run({
+        "env",
+        "PATH=" .. path,
+        rustc,
+        "--version",
+    })
+
+    log("Rust toolchain is ready")
 end
 
--- ------------------------------------------------------------
--- Managed directories and links
--- ------------------------------------------------------------
+-- ============================================================
+-- Coqui build and installation
+-- ============================================================
+
+local function build_coqui()
+    log("Preparing Coqui source")
+
+    if not exists(COQUI_DIR .. "/.git") then
+        if exists(COQUI_DIR) then
+            fail("Coqui source exists but is not a Git repository.")
+        end
+
+        mkdir(SRC)
+
+        run({
+            "git",
+            "clone",
+            COQUI_REPO,
+            COQUI_DIR,
+        })
+    end
+
+    log("Fetching Coqui revision")
+
+    run({
+        "git",
+        "-C",
+        COQUI_DIR,
+        "fetch",
+        "origin",
+        COQUI_REV,
+    })
+
+    run({
+        "git",
+        "-C",
+        COQUI_DIR,
+        "checkout",
+        "--detach",
+        COQUI_REV,
+    })
+
+    local cargo = HOME .. "/.cargo/bin/cargo"
+    local path = HOME .. "/.cargo/bin:" .. (os.getenv("PATH") or "")
+
+    log("Building Coqui in release mode")
+
+    run({
+        "env",
+        "PATH=" .. path,
+        cargo,
+        "build",
+        "--release",
+        "--manifest-path",
+        COQUI_DIR .. "/Cargo.toml",
+    })
+
+    local built = COQUI_DIR .. "/target/release/coqui"
+
+    if not exists(built) then
+        fail(
+            "Coqui build did not produce the expected binary:\n"
+            .. built
+        )
+    end
+
+    mkdir(BIN)
+
+    log("Installing Coqui binary")
+
+    run({
+        "install",
+        "-m",
+        "0755",
+        built,
+        COQUI_BIN,
+    })
+
+    log("Coqui installed successfully: " .. COQUI_BIN)
+end
+
+-- ============================================================
+-- Managed directories and symlinks
+-- ============================================================
 
 local function create_directories()
     for _, path in ipairs({
         ROOT,
         CONFIG .. "/i3",
         CONFIG .. "/i3status",
+        CONFIG .. "/rama",
         BIN,
+        SRC,
         LOCAL_BIN,
         HOME .. "/.config/i3",
         HOME .. "/.config/i3status",
+        HOME .. "/.config/rama",
     }) do
         mkdir(path)
     end
@@ -347,96 +671,212 @@ local function link(target, destination)
         end
     elseif exists(destination) then
         fail(
-            "File already exists: " .. destination
-            .. "\nBack it up before running the installer again."
+            "Existing file will not be overwritten: " .. destination
+            .. "\nBack it up or move it manually, then retry."
         )
     end
 
     run({ "ln", "-s", target, destination })
 end
 
--- ------------------------------------------------------------
--- i3 configuration
--- ------------------------------------------------------------
+-- ============================================================
+-- Launcher scripts
+-- ============================================================
 
-local function generate_i3()
-    local content = [=[
-set $mod Mod4
-font pango:DejaVu Sans Mono 9
+local function generate_scripts()
+    write_file(
+        BIN .. "/rama-coqui-launch",
+        ([=[
+#!/bin/sh
+exec xterm -class floating-terminal -e %q
+]=]):format(COQUI_BIN),
+        "0755"
+    )
 
-# Catppuccin Mocha
-client.focused          #cba6f7 #313244 #cdd6f4 #cba6f7 #313244
-client.unfocused        #1e1e2e #1e1e2e #a6adc8 #313244 #1e1e2e
-client.urgent           #f38ba8 #f38ba8 #11111b #f38ba8 #f38ba8
+    write_file(
+        BIN .. "/rama-power-menu",
+        [=[
+#!/bin/sh
 
-default_border pixel 1
-default_floating_border pixel 1
-gaps inner 4
-gaps outer 2
+choice=$(
+    printf '%s\n' "Shutdown" "Reboot" "Logout" |
+        dmenu -i -p "Power:"
+)
 
-# Applications
-bindsym $mod+Return exec xterm
-bindsym $mod+d exec dmenu_run
+case "$choice" in
+    Shutdown) poweroff ;;
+    Reboot)   reboot ;;
+    Logout)   i3-msg exit ;;
+esac
+]=],
+        "0755"
+    )
 
-# Window controls
-bindsym $mod+Shift+q kill
-bindsym $mod+Shift+c reload
-bindsym $mod+Shift+r restart
-bindsym $mod+Shift+e exit
-
-# Focus
-bindsym $mod+h focus left
-bindsym $mod+j focus down
-bindsym $mod+k focus up
-bindsym $mod+l focus right
-
-# Move containers
-bindsym $mod+Shift+h move left
-bindsym $mod+Shift+j move down
-bindsym $mod+Shift+k move up
-bindsym $mod+Shift+l move right
-
-# Workspaces
-]=]
-
-    for n = 1, 9 do
-        content = content
-            .. ("bindsym $mod+%d workspace number %d\n"):format(n, n)
-            .. ("bindsym $mod+Shift+%d move container to workspace number %d\n"):format(n, n)
+    for _, name in ipairs({
+        "coqui",
+        "rama-coqui-launch",
+        "rama-power-menu",
+    }) do
+        link(BIN .. "/" .. name, LOCAL_BIN .. "/" .. name)
     end
-
-    content = content .. [[
-
-bar {
-    position bottom
-    status_command i3status
-    colors {
-        background #1e1e2e
-        statusline #cdd6f4
-        separator #a6adc8
-        focused_workspace #89b4fa #89b4fa #11111b
-        active_workspace #313244 #313244 #cdd6f4
-        inactive_workspace #1e1e2e #1e1e2e #a6adc8
-        urgent_workspace #f38ba8 #f38ba8 #11111b
-    }
-}
-]]
-
-    write_file(CONFIG .. "/i3/config", content)
 end
 
--- ------------------------------------------------------------
+-- ============================================================
+-- Coqui configuration generator
+-- ============================================================
+
+local function generate_coqui()
+    local lines = {
+        'theme = "nixos"',
+        "",
+    }
+
+    local previous_category = nil
+
+    for _, app in ipairs(applications) do
+        local available = not app.optional
+            or succeeds("command -v " .. quote(app.command))
+
+        if available then
+            if app.category ~= previous_category then
+                lines[#lines + 1] = "[[command]]"
+                lines[#lines + 1] = "label = "
+                    .. toml_quote("------ " .. app.category)
+                lines[#lines + 1] = ""
+
+                previous_category = app.category
+            end
+
+            local command = app.command
+
+            if app.terminal then
+                command = "xterm -e " .. command
+            end
+
+            lines[#lines + 1] = "[[command]]"
+            lines[#lines + 1] = "label = " .. toml_quote(app.label)
+            lines[#lines + 1] = "cmd = " .. toml_quote(command)
+            lines[#lines + 1] = 'description = ""'
+            lines[#lines + 1] = ""
+        end
+    end
+
+    write_file(
+        CONFIG .. "/rama/coqui_config.toml",
+        table.concat(lines, "\n")
+    )
+end
+
+-- ============================================================
+-- i3 configuration
+-- ============================================================
+
+local function generate_i3()
+    local c = theme.colors
+
+    local lines = {
+        "set $mod Mod4",
+        "",
+        ("font pango:%s %d"):format(theme.font.family, theme.font.size),
+        "",
+        "# Catppuccin Mocha",
+        ("client.focused          %s %s %s %s %s"):format(
+            c.accent, c.bg_alt, c.fg, c.accent, c.bg_alt
+        ),
+        ("client.unfocused        %s %s %s %s %s"):format(
+            c.bg, c.bg, c.muted, c.bg_alt, c.bg
+        ),
+        ("client.urgent           %s %s %s %s %s"):format(
+            c.danger, c.danger, c.bg_dark, c.danger, c.danger
+        ),
+        "",
+        "default_border pixel 1",
+        "default_floating_border pixel 1",
+        ("gaps inner %d"):format(theme.spacing.inner),
+        ("gaps outer %d"):format(theme.spacing.outer),
+        "",
+        "# Startup",
+        "exec --no-startup-id dunst",
+        "",
+        "# Application launcher",
+        "bindsym $mod+space exec --no-startup-id rama-coqui-launch",
+        "bindsym $mod+Return exec --no-startup-id xterm",
+        "bindsym $mod+d exec --no-startup-id dmenu_run",
+        "",
+        "# Window controls",
+        "bindsym $mod+Shift+q kill",
+        "bindsym $mod+Shift+c reload",
+        "bindsym $mod+Shift+r restart",
+        "bindsym $mod+Shift+e exec --no-startup-id rama-power-menu",
+        "",
+        "# Focus",
+        "bindsym $mod+h focus left",
+        "bindsym $mod+j focus down",
+        "bindsym $mod+k focus up",
+        "bindsym $mod+l focus right",
+        "",
+        "# Move containers",
+        "bindsym $mod+Shift+h move left",
+        "bindsym $mod+Shift+j move down",
+        "bindsym $mod+Shift+k move up",
+        "bindsym $mod+Shift+l move right",
+        "",
+        "# Floating terminal",
+        'for_window [class="^floating-terminal$"] floating enable, resize set 350 400, move position center',
+        "",
+        "# Workspaces",
+    }
+
+    for n = 1, 9 do
+        lines[#lines + 1] = (
+            "bindsym $mod+%d workspace number %d"
+        ):format(n, n)
+
+        lines[#lines + 1] = (
+            "bindsym $mod+Shift+%d move container to workspace number %d"
+        ):format(n, n)
+    end
+
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "bar {"
+    lines[#lines + 1] = "    position bottom"
+    lines[#lines + 1] = "    status_command i3status"
+    lines[#lines + 1] = "    colors {"
+    lines[#lines + 1] = "        background " .. c.bg
+    lines[#lines + 1] = "        statusline " .. c.fg
+    lines[#lines + 1] = "        separator " .. c.muted
+    lines[#lines + 1] = ("        focused_workspace %s %s %s"):format(
+        c.blue, c.blue, c.bg_dark
+    )
+    lines[#lines + 1] = ("        active_workspace %s %s %s"):format(
+        c.bg_alt, c.bg_alt, c.fg
+    )
+    lines[#lines + 1] = ("        inactive_workspace %s %s %s"):format(
+        c.bg, c.bg, c.muted
+    )
+    lines[#lines + 1] = ("        urgent_workspace %s %s %s"):format(
+        c.danger, c.danger, c.bg_dark
+    )
+    lines[#lines + 1] = "    }"
+    lines[#lines + 1] = "}"
+
+    write_file(CONFIG .. "/i3/config", table.concat(lines, "\n"))
+end
+
+-- ============================================================
 -- i3status configuration
--- ------------------------------------------------------------
+-- ============================================================
 
 local function generate_i3status()
-    write_file(CONFIG .. "/i3status/config", [=[
+    local c = theme.colors
+
+    write_file(CONFIG .. "/i3status/config", ([=[
 general {
     colors = true
     interval = 5
-    color_good = "#a6e3a1"
-    color_degraded = "#fab387"
-    color_bad = "#f38ba8"
+    color_good = "%s"
+    color_degraded = "%s"
+    color_bad = "%s"
 }
 
 order += "cpu_usage"
@@ -444,22 +884,22 @@ order += "memory"
 order += "tztime local"
 
 cpu_usage {
-    format = "CPU: %usage"
+    format = "CPU: %%usage"
 }
 
 memory {
-    format = "RAM: %used"
+    format = "RAM: %%used"
 }
 
 tztime local {
-    format = "%Y-%m-%d %H:%M"
+    format = "%%Y-%%m-%%d %%H:%%M"
 }
-]=])
+]=]):format(c.success, c.warning, c.danger))
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- X session
--- ------------------------------------------------------------
+-- ============================================================
 
 local function generate_xinitrc()
     local path = HOME .. "/.xinitrc"
@@ -472,38 +912,91 @@ local function generate_xinitrc()
     write_file(path, [=[
 #!/bin/sh
 exec dbus-run-session i3
-]=])
+]=], "0755")
 end
 
--- ------------------------------------------------------------
+-- ============================================================
+-- OpenRC services and user groups
+-- ============================================================
+
+local function configure_system()
+    privileged({ "rc-update", "add", "dbus", "default" })
+
+    local group_file = read_file("/etc/group") or ""
+    local known = {}
+
+    for line in group_file:gmatch("[^\r\n]+") do
+        local name = line:match("^([^:]+):")
+
+        if name then
+            known[name] = true
+        end
+    end
+
+    local handle = io.popen("id -nG " .. quote(USER))
+    local current = {}
+
+    if handle then
+        for group in (handle:read("*a") or ""):gmatch("%S+") do
+            current[group] = true
+        end
+
+        handle:close()
+    end
+
+    for _, group in ipairs({ "input", "video", "audio" }) do
+        if known[group] and not current[group] then
+            privileged({ "addgroup", USER, group })
+        end
+    end
+end
+
+-- ============================================================
 -- Apply configuration
--- ------------------------------------------------------------
+-- ============================================================
 
 local function apply()
     create_directories()
+    generate_scripts()
+    generate_coqui()
     generate_i3()
     generate_i3status()
     generate_xinitrc()
 
-    link(CONFIG .. "/i3/config", HOME .. "/.config/i3/config")
+    link(
+        CONFIG .. "/i3/config",
+        HOME .. "/.config/i3/config"
+    )
+
     link(
         CONFIG .. "/i3status/config",
         HOME .. "/.config/i3status/config"
     )
 
+    link(
+        CONFIG .. "/rama/coqui_config.toml",
+        HOME .. "/.config/rama/coqui_config.toml"
+    )
+
     log("Configuration applied.")
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Validation
--- ------------------------------------------------------------
+-- ============================================================
 
 local function check()
     local failed = false
 
+    local cargo_bin = HOME .. "/.cargo/bin"
+    local path = cargo_bin .. ":" .. (os.getenv("PATH") or "")
+
     for _, command in ipairs({
+        "lua5.4",
         "apk",
-        "startx",
+        "git",
+        "curl",
+        "xinit",
         "i3",
         "i3status",
         "dmenu_run",
@@ -518,15 +1011,29 @@ local function check()
         end
     end
 
-    for _, path in ipairs({
+    for _, command in ipairs({
+        cargo_bin .. "/cargo",
+        cargo_bin .. "/rustc",
+        COQUI_BIN,
+    }) do
+        if exists(command) then
+            print("[OK]      " .. command)
+        else
+            print("[MISSING] " .. command)
+            failed = true
+        end
+    end
+
+    for _, path_to_check in ipairs({
         CONFIG .. "/i3/config",
         CONFIG .. "/i3status/config",
+        CONFIG .. "/rama/coqui_config.toml",
         HOME .. "/.xinitrc",
     }) do
-        if exists(path) then
-            print("[OK]      " .. path)
+        if exists(path_to_check) then
+            print("[OK]      " .. path_to_check)
         else
-            print("[MISSING] " .. path)
+            print("[MISSING] " .. path_to_check)
             failed = true
         end
     end
@@ -538,9 +1045,9 @@ local function check()
     log("All checks passed.")
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- Uninstall managed configuration
--- ------------------------------------------------------------
+-- ============================================================
 
 local function uninstall()
     local links = {
@@ -548,6 +1055,19 @@ local function uninstall()
         {
             CONFIG .. "/i3status/config",
             HOME .. "/.config/i3status/config",
+        },
+        {
+            CONFIG .. "/rama/coqui_config.toml",
+            HOME .. "/.config/rama/coqui_config.toml",
+        },
+        { BIN .. "/coqui", LOCAL_BIN .. "/coqui" },
+        {
+            BIN .. "/rama-coqui-launch",
+            LOCAL_BIN .. "/rama-coqui-launch",
+        },
+        {
+            BIN .. "/rama-power-menu",
+            LOCAL_BIN .. "/rama-power-menu",
         },
     }
 
@@ -568,12 +1088,12 @@ local function uninstall()
         end
     end
 
-    log("Uninstall completed. System packages were not removed.")
+    log("Uninstall completed. System packages and Rust were not removed.")
 end
 
--- ------------------------------------------------------------
+-- ============================================================
 -- CLI
--- ------------------------------------------------------------
+-- ============================================================
 
 local action = arg[1] or "install"
 
@@ -582,6 +1102,8 @@ if action == "install" then
     enable_community()
     install_packages()
     configure_system()
+    install_rust()
+    build_coqui()
     apply()
 
     print("")
