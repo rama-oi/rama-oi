@@ -88,6 +88,8 @@ local packages = {
         "libxkbcommon-dev",
         "openssl-dev",
         "zlib-dev",
+        "rust",
+        "cargo",
     },
 
     utilities = {
@@ -466,90 +468,23 @@ end
 -- ============================================================
 
 local function install_rust()
-    local cargo_home = HOME .. "/.cargo"
-    local cargo_bin = cargo_home .. "/bin"
-    local rustup = cargo_bin .. "/rustup"
-    local cargo = cargo_bin .. "/cargo"
-    local rustc = cargo_bin .. "/rustc"
+    log("Installing Alpine Rust toolchain")
 
-    mkdir(cargo_bin)
-
-    if not exists(rustup) then
-        log("Installing rustup")
-
-        local installer = os.tmpname()
-
-        run({
-            "curl",
-            "--proto",
-            "=https",
-            "--tlsv1.2",
-            "-fsSL",
-            "https://sh.rustup.rs",
-            "-o",
-            installer,
-        })
-
-        local ok, reason, code = os.execute(
-            "sh " .. quote(installer)
-            .. " -y --profile minimal"
-        )
-
-        os.remove(installer)
-
-        if ok ~= true then
-            fail(("rustup installation failed (%s, %s)"):format(
-                tostring(reason),
-                tostring(code)
-            ))
-        end
-    end
-
-    if not exists(rustup) then
-        fail("rustup is missing after installation.")
-    end
-
-    local path = cargo_bin .. ":" .. (os.getenv("PATH") or "")
-
-    local function rust_command(...)
-        local args = {
-            "env",
-            "PATH=" .. path,
-            rustup,
-        }
-
-        for _, value in ipairs({ ... }) do
-            args[#args + 1] = value
-        end
-
-        run(args)
-    end
-
-    log("Updating rustup")
-    rust_command("self", "update")
-
-    log("Installing or updating the stable Rust toolchain")
-    rust_command("toolchain", "install", "stable", "--profile", "minimal")
-    rust_command("default", "stable")
-    rust_command("update", "stable")
-
-    if not exists(cargo) or not exists(rustc) then
-        fail("Cargo or rustc is missing after Rust installation.")
-    end
-
-    run({
-        "env",
-        "PATH=" .. path,
-        cargo,
-        "--version",
+    privileged({
+        "apk",
+        "add",
+        "--no-cache",
+        "rust",
+        "cargo",
     })
 
-    run({
-        "env",
-        "PATH=" .. path,
-        rustc,
-        "--version",
-    })
+    if not succeeds("command -v cargo")
+        or not succeeds("command -v rustc") then
+        fail("Alpine Rust packages did not install correctly.")
+    end
+
+    run({ "cargo", "--version" })
+    run({ "rustc", "--version" })
 
     log("Rust toolchain is ready")
 end
@@ -596,8 +531,8 @@ local function build_coqui()
         COQUI_REV,
     })
 
-    local cargo = HOME .. "/.cargo/bin/cargo"
-    local path = HOME .. "/.cargo/bin:" .. (os.getenv("PATH") or "")
+    local cargo = "cargo"
+    local path = os.getenv("PATH") or ""
 
     log("Building Coqui in release mode")
 
@@ -996,6 +931,8 @@ local function check()
         "apk",
         "git",
         "curl",
+        "cargo",
+        "rustc",
         "xinit",
         "i3",
         "i3status",
