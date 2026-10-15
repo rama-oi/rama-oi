@@ -78,7 +78,7 @@ local packages = {
         "caja",
         "dunst",
         "libnotify",
-        "xsetroot",
+        -- "xsetroot",
     },
 
     build = {
@@ -860,12 +860,12 @@ end
 local function generate_xinitrc()
     local path = HOME .. "/.xinitrc"
 
+    -- xsetroot -solid "#89b4fa"
+
     write_file(path, [=[
 #!/bin/sh
 
 export PATH="$HOME/.local/bin:$PATH"
-
-xsetroot -solid "#89b4fa"
 
 # Start the session bus and dwm.
 exec dbus-run-session "$HOME/.local/bin/dwm"
