@@ -72,6 +72,7 @@ local packages = {
         "dbus-x11",
         "dmenu",
         "xterm",
+        "st",
         "font-dejavu",
         "xf86-input-libinput",
         "mesa",
