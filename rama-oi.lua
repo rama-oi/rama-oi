@@ -859,11 +859,6 @@ end
 local function generate_xinitrc()
     local path = HOME .. "/.xinitrc"
 
-    if exists(path) then
-        log("Keeping existing " .. path)
-        return
-    end
-
     write_file(path, [=[
 #!/bin/sh
 
