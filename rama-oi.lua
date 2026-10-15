@@ -71,7 +71,6 @@ local packages = {
         "dbus",
         "dbus-x11",
         "dmenu",
-        "xterm",
         "st",
         "font-dejavu",
         "xf86-input-libinput",
@@ -129,7 +128,7 @@ local applications = {
     {
         category = "Utilities",
         label = "Terminal",
-        command = "xterm",
+        command = "st",
         terminal = false,
     },
     {
@@ -734,7 +733,7 @@ local function generate_scripts()
         BIN .. "/rama-coqui-launch",
         ([=[
 #!/bin/sh
-exec xterm -class floating-terminal -e %q
+exec st -c floating-terminal -e %q
 ]=]):format(COQUI_BIN),
         "0755"
     )
@@ -807,7 +806,7 @@ local function generate_coqui()
             local command = app.command
 
             if app.terminal then
-                command = "xterm -e " .. command
+                command = "st -e " .. command
             end
 
             lines[#lines + 1] = "[[command]]"
@@ -953,7 +952,7 @@ local function check()
         "xinit",
         "dmenu",
         "dmenu_run",
-        "xterm",
+        "st",
         "dbus-run-session",
         "dunst",
         "pkill",
