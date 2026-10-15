@@ -78,7 +78,6 @@ local packages = {
         "caja",
         "dunst",
         "libnotify",
-        -- "xsetroot",
     },
 
     build = {
@@ -125,89 +124,89 @@ local enabled_packages = {
 -- Application definitions
 -- ============================================================
 
-local applications = {
-    {
-        category = "Utilities",
-        label = "Terminal",
-        command = "st",
-        terminal = false,
-    },
-    {
-        category = "Utilities",
-        label = "Mousepad",
-        command = "mousepad",
-        terminal = false,
-    },
-    {
-        category = "Utilities",
-        label = "File Manager",
-        command = "caja",
-        terminal = false,
-    },
-    {
-        category = "Utilities",
-        label = "Midnight Commander",
-        command = "mc",
-        terminal = true,
-    },
-    {
-        category = "Utilities",
-        label = "Btop",
-        command = "btop",
-        terminal = true,
-    },
-    {
-        category = "Networking",
-        label = "Impala",
-        command = "impala",
-        terminal = true,
-        optional = true,
-    },
-    {
-        category = "Networking",
-        label = "Bluetui",
-        command = "bluetui",
-        terminal = true,
-        optional = true,
-    },
-    {
-        category = "Networking",
-        label = "Wiremix",
-        command = "wiremix",
-        terminal = true,
-        optional = true,
-    },
-    {
-        category = "Multimedia",
-        label = "Cmus",
-        command = "cmus",
-        terminal = true,
-    },
-    {
-        category = "Multimedia",
-        label = "VLC",
-        command = "vlc",
-        terminal = false,
-    },
-    {
-        category = "System",
-        label = "Logout",
-        command = "rama-logout",
-        terminal = false,
-    },
-    {
-        category = "System",
-        label = "Reboot",
-        command = "reboot",
-        terminal = false,
-    },
-    {
-        category = "System",
-        label = "Shutdown",
-        command = "poweroff",
-        terminal = false,
-    },
-}
+-- local applications = {
+--     {
+--         category = "Utilities",
+--         label = "Terminal",
+--         command = "st",
+--         terminal = false,
+--     },
+--     {
+--         category = "Utilities",
+--         label = "Mousepad",
+--         command = "mousepad",
+--         terminal = false,
+--     },
+--     {
+--         category = "Utilities",
+--         label = "File Manager",
+--         command = "caja",
+--         terminal = false,
+--     },
+--     {
+--         category = "Utilities",
+--         label = "Midnight Commander",
+--         command = "mc",
+--         terminal = true,
+--     },
+--     {
+--         category = "Utilities",
+--         label = "Btop",
+--         command = "btop",
+--         terminal = true,
+--     },
+--     {
+--         category = "Networking",
+--         label = "Impala",
+--         command = "impala",
+--         terminal = true,
+--         optional = true,
+--     },
+--     {
+--         category = "Networking",
+--         label = "Bluetui",
+--         command = "bluetui",
+--         terminal = true,
+--         optional = true,
+--     },
+--     {
+--         category = "Networking",
+--         label = "Wiremix",
+--         command = "wiremix",
+--         terminal = true,
+--         optional = true,
+--     },
+--     {
+--         category = "Multimedia",
+--         label = "Cmus",
+--         command = "cmus",
+--         terminal = true,
+--     },
+--     {
+--         category = "Multimedia",
+--         label = "VLC",
+--         command = "vlc",
+--         terminal = false,
+--     },
+--     {
+--         category = "System",
+--         label = "Logout",
+--         command = "rama-logout",
+--         terminal = false,
+--     },
+--     {
+--         category = "System",
+--         label = "Reboot",
+--         command = "reboot",
+--         terminal = false,
+--     },
+--     {
+--         category = "System",
+--         label = "Shutdown",
+--         command = "poweroff",
+--         terminal = false,
+--     },
+-- }
 
 -- ============================================================
 -- Helpers
@@ -505,180 +504,256 @@ local function install_rust()
 end
 
 -- ============================================================
--- dwm build and installation
+-- GitHub source builder
+--
+-- Declarative, in the spirit of Nix: each entry names a repo and
+-- the exact ref (branch, tag or commit) to build. `build_from_github`
+-- fetches that ref, builds it, installs it, and records the built
+-- commit so unchanged sources are not rebuilt.
 -- ============================================================
 
-local function build_dwm()
-    log("Preparing Rama-OI dwm source")
+local STATE = ROOT .. "/state"
 
-    if not exists(DWM_DIR .. "/.git") then
-        if exists(DWM_DIR) then
+-- Fields:
+--   repo      Git URL
+--   ref       branch, tag or full commit hash
+--   build     "make" or "cargo"
+--   bin       installed binary; verified after the build
+--   requires  files that must exist in the repo (optional)
+--   prefix    make: PREFIX passed to `make install`
+--   cargo_bin cargo: binary name under target/release
+local sources = {
+    dwm = {
+        repo = DWM_REPO,
+        ref = DWM_BRANCH,
+        build = "make",
+        prefix = HOME .. "/.local",
+        requires = { "config.h" },
+        bin = DWM_BIN,
+    },
+
+    -- More software goes here, for example:
+    -- coqui = {
+    --     repo = COQUI_REPO,
+    --     ref = COQUI_REV,
+    --     build = "cargo",
+    --     cargo_bin = "coqui",
+    --     bin = COQUI_BIN,
+    -- },
+}
+
+-- Build order for `build all` and `install`.
+local source_order = { "dwm" }
+
+local function git_head(dir)
+    local handle = io.popen(
+        "git -C " .. quote(dir) .. " rev-parse HEAD 2>/dev/null"
+    )
+
+    if not handle then
+        return nil
+    end
+
+    local head = handle:read("*l")
+    handle:close()
+
+    return head
+end
+
+local function build_from_github(name, force)
+    local source = sources[name]
+
+    if not source then
+        fail("Unknown source: " .. tostring(name))
+    end
+
+    local dir = SRC .. "/" .. name
+    local stamp = STATE .. "/" .. name .. ".rev"
+
+    log("Preparing " .. name .. " (" .. source.repo
+        .. " @ " .. source.ref .. ")")
+
+    if not exists(dir .. "/.git") then
+        if exists(dir) then
             fail(
-                "dwm source exists but is not a Git repository: "
-                .. DWM_DIR
+                name .. " source exists but is not a Git repository: "
+                .. dir
                 .. "\nMove or remove it manually before retrying."
             )
         end
 
         mkdir(SRC)
+        run({ "git", "clone", source.repo, dir })
+    end
+
+    run({ "git", "-C", dir, "fetch", "origin", source.ref })
+
+    log("WARNING: Local changes inside " .. dir .. " will be discarded")
+    run({ "git", "-C", dir, "checkout", "--force", "--detach", "FETCH_HEAD" })
+    run({ "git", "-C", dir, "clean", "-fd" })
+
+    local head = git_head(dir)
+
+    if not head then
+        fail("Cannot determine built revision for " .. name)
+    end
+
+    if not force
+        and exists(source.bin)
+        and read_file(stamp) == head .. "\n" then
+        log(name .. " is up to date (" .. head:sub(1, 12) .. ")")
+        return
+    end
+
+    for _, file in ipairs(source.requires or {}) do
+        if not exists(dir .. "/" .. file) then
+            fail(
+                "Missing " .. file .. " in " .. name .. " repository.\n"
+                .. "Commit it to " .. source.ref .. " first."
+            )
+        end
+    end
+
+    log("Building " .. name .. " " .. head:sub(1, 12))
+
+    if source.build == "make" then
+        run({ "make", "-C", dir, "clean" })
+        run({ "make", "-C", dir })
+
+        mkdir(LOCAL_BIN)
 
         run({
-            "git",
-            "clone",
-            DWM_REPO,
-            DWM_DIR,
+            "make", "-C", dir,
+            "PREFIX=" .. (source.prefix or (HOME .. "/.local")),
+            "install",
         })
+
+    elseif source.build == "cargo" then
+        run({
+            "cargo", "build", "--release",
+            "--manifest-path", dir .. "/Cargo.toml",
+        })
+
+        local built = dir .. "/target/release/"
+            .. (source.cargo_bin or name)
+
+        if not exists(built) then
+            fail("cargo did not produce the expected binary: " .. built)
+        end
+
+        mkdir(BIN)
+        run({ "install", "-m", "0755", built, source.bin })
+
+    else
+        fail("Unknown build type for " .. name .. ": "
+            .. tostring(source.build))
     end
 
-    log("Fetching latest Rama-OI dwm")
-
-    run({
-        "git",
-        "-C", DWM_DIR,
-        "fetch",
-        "origin",
-        "main",
-    })
-
-    log("Resetting dwm source to origin/main")
-    log("WARNING: Local changes inside " .. DWM_DIR .. " will be discarded")
-
-    run({
-        "git",
-        "-C", DWM_DIR,
-        "checkout",
-        "-B", "main",
-        "origin/main",
-    })
-
-    run({
-        "git",
-        "-C", DWM_DIR,
-        "reset",
-        "--hard",
-        "origin/main",
-    })
-
-    run({
-        "git",
-        "-C", DWM_DIR,
-        "clean",
-        "-fd",
-    })
-
-    if not exists(DWM_DIR .. "/config.h") then
-        fail(
-            "Missing config.h in Rama-OI dwm repository.\n"
-            .. "Commit config.h to the main branch first."
-        )
+    if not exists(source.bin) then
+        fail(name .. " binary missing after installation: " .. source.bin)
     end
 
-    log("Building Rama-OI dwm")
+    mkdir(STATE)
+    write_file(stamp, head .. "\n")
 
-    run({
-        "make",
-        "-C", DWM_DIR,
-        "clean",
-    })
+    log(name .. " installed: " .. source.bin)
+end
 
-    run({
-        "make",
-        "-C", DWM_DIR,
-    })
-
-    mkdir(LOCAL_BIN)
-
-    log("Installing Rama-OI dwm")
-
-    run({
-        "make",
-        "-C", DWM_DIR,
-        "PREFIX=" .. HOME .. "/.local",
-        "install",
-    })
-
-    if not exists(DWM_BIN) then
-        fail("dwm binary missing after installation: " .. DWM_BIN)
+local function build_all(force)
+    for _, name in ipairs(source_order) do
+        build_from_github(name, force)
     end
+end
 
-    log("Rama-OI dwm installed: " .. DWM_BIN)
+local function list_sources()
+    for _, name in ipairs(source_order) do
+        local source = sources[name]
+        local built = read_file(STATE .. "/" .. name .. ".rev")
+
+        print(("%-10s %s @ %s  [%s]"):format(
+            name,
+            source.repo,
+            source.ref,
+            built and built:sub(1, 12) or "not built"
+        ))
+    end
 end
 
 -- ============================================================
 -- Coqui build and installation
 -- ============================================================
 
-local function build_coqui()
-    log("Preparing Coqui source")
+-- local function build_coqui()
+--     log("Preparing Coqui source")
 
-    if not exists(COQUI_DIR .. "/.git") then
-        if exists(COQUI_DIR) then
-            fail("Coqui source exists but is not a Git repository.")
-        end
+--     if not exists(COQUI_DIR .. "/.git") then
+--         if exists(COQUI_DIR) then
+--             fail("Coqui source exists but is not a Git repository.")
+--         end
 
-        mkdir(SRC)
+--         mkdir(SRC)
 
-        run({
-            "git",
-            "clone",
-            COQUI_REPO,
-            COQUI_DIR,
-        })
-    end
+--         run({
+--             "git",
+--             "clone",
+--             COQUI_REPO,
+--             COQUI_DIR,
+--         })
+--     end
 
-    log("Fetching Coqui revision")
+--     log("Fetching Coqui revision")
 
-    run({
-        "git",
-        "-C",
-        COQUI_DIR,
-        "fetch",
-        "origin",
-        COQUI_REV,
-    })
+--     run({
+--         "git",
+--         "-C",
+--         COQUI_DIR,
+--         "fetch",
+--         "origin",
+--         COQUI_REV,
+--     })
 
-    run({
-        "git",
-        "-C",
-        COQUI_DIR,
-        "checkout",
-        "--detach",
-        COQUI_REV,
-    })
+--     run({
+--         "git",
+--         "-C",
+--         COQUI_DIR,
+--         "checkout",
+--         "--detach",
+--         COQUI_REV,
+--     })
 
-    log("Building Coqui in release mode")
+--     log("Building Coqui in release mode")
 
-    run({
-        "cargo",
-        "build",
-        "--release",
-        "--manifest-path",
-        COQUI_DIR .. "/Cargo.toml",
-    })
+--     run({
+--         "cargo",
+--         "build",
+--         "--release",
+--         "--manifest-path",
+--         COQUI_DIR .. "/Cargo.toml",
+--     })
 
-    local built = COQUI_DIR .. "/target/release/coqui"
+--     local built = COQUI_DIR .. "/target/release/coqui"
 
-    if not exists(built) then
-        fail(
-            "Coqui build did not produce the expected binary:\n"
-            .. built
-        )
-    end
+--     if not exists(built) then
+--         fail(
+--             "Coqui build did not produce the expected binary:\n"
+--             .. built
+--         )
+--     end
 
-    mkdir(BIN)
+--     mkdir(BIN)
 
-    log("Installing Coqui binary")
+--     log("Installing Coqui binary")
 
-    run({
-        "install",
-        "-m",
-        "0755",
-        built,
-        COQUI_BIN,
-    })
+--     run({
+--         "install",
+--         "-m",
+--         "0755",
+--         built,
+--         COQUI_BIN,
+--     })
 
-    log("Coqui installed successfully: " .. COQUI_BIN)
-end
+--     log("Coqui installed successfully: " .. COQUI_BIN)
+-- end
 
 -- ============================================================
 -- Managed directories and symlinks
@@ -729,100 +804,100 @@ end
 -- Launcher scripts
 -- ============================================================
 
-local function generate_scripts()
-    write_file(
-        BIN .. "/rama-coqui-launch",
-        ([=[
-#!/bin/sh
-exec st -c floating-terminal -e %q
-]=]):format(COQUI_BIN),
-        "0755"
-    )
+-- local function generate_scripts()
+--     write_file(
+--         BIN .. "/rama-coqui-launch",
+--         ([=[
+-- #!/bin/sh
+-- exec st -c floating-terminal -e %q
+-- ]=]):format(COQUI_BIN),
+--         "0755"
+--     )
 
-    write_file(
-        BIN .. "/rama-power-menu",
-        [=[
-#!/bin/sh
+--     write_file(
+--         BIN .. "/rama-power-menu",
+--         [=[
+-- #!/bin/sh
 
-choice=$(
-    printf '%s\n' "Shutdown" "Reboot" "Logout" |
-        dmenu -i -p "Power:"
-)
+-- choice=$(
+--     printf '%s\n' "Shutdown" "Reboot" "Logout" |
+--         dmenu -i -p "Power:"
+-- )
 
-case "$choice" in
-    Shutdown) exec poweroff ;;
-    Reboot)   exec reboot ;;
-    Logout)   exec rama-logout ;;
-esac
-]=],
-        "0755"
-    )
+-- case "$choice" in
+--     Shutdown) exec poweroff ;;
+--     Reboot)   exec reboot ;;
+--     Logout)   exec rama-logout ;;
+-- esac
+-- ]=],
+--         "0755"
+--     )
 
-    write_file(
-        BIN .. "/rama-logout",
-        [=[
-#!/bin/sh
-# Exit the current X session.
-exec pkill -TERM -x dwm
-]=],
-        "0755"
-    )
+--     write_file(
+--         BIN .. "/rama-logout",
+--         [=[
+-- #!/bin/sh
+-- # Exit the current X session.
+-- exec pkill -TERM -x dwm
+-- ]=],
+--         "0755"
+--     )
 
-    for _, name in ipairs({
-        "coqui",
-        "rama-coqui-launch",
-        "rama-power-menu",
-        "rama-logout",
-    }) do
-        link(BIN .. "/" .. name, LOCAL_BIN .. "/" .. name)
-    end
-end
+--     for _, name in ipairs({
+--         "coqui",
+--         "rama-coqui-launch",
+--         "rama-power-menu",
+--         "rama-logout",
+--     }) do
+--         link(BIN .. "/" .. name, LOCAL_BIN .. "/" .. name)
+--     end
+-- end
 
 -- ============================================================
 -- Coqui configuration generator
 -- ============================================================
 
-local function generate_coqui()
-    local lines = {
-        'theme = "catppuccin-mocha"',
-        "",
-    }
+-- local function generate_coqui()
+--     local lines = {
+--         'theme = "catppuccin-mocha"',
+--         "",
+--     }
 
-    local previous_category = nil
+--     local previous_category = nil
 
-    for _, app in ipairs(applications) do
-        local available = not app.optional
-            or succeeds("command -v " .. quote(app.command))
+--     for _, app in ipairs(applications) do
+--         local available = not app.optional
+--             or succeeds("command -v " .. quote(app.command))
 
-        if available then
-            if app.category ~= previous_category then
-                lines[#lines + 1] = "[[command]]"
-                lines[#lines + 1] = "label = "
-                    .. toml_quote("------ " .. app.category)
-                lines[#lines + 1] = ""
+--         if available then
+--             if app.category ~= previous_category then
+--                 lines[#lines + 1] = "[[command]]"
+--                 lines[#lines + 1] = "label = "
+--                     .. toml_quote("------ " .. app.category)
+--                 lines[#lines + 1] = ""
 
-                previous_category = app.category
-            end
+--                 previous_category = app.category
+--             end
 
-            local command = app.command
+--             local command = app.command
 
-            if app.terminal then
-                command = "st -e " .. command
-            end
+--             if app.terminal then
+--                 command = "st -e " .. command
+--             end
 
-            lines[#lines + 1] = "[[command]]"
-            lines[#lines + 1] = "label = " .. toml_quote(app.label)
-            lines[#lines + 1] = "cmd = " .. toml_quote(command)
-            lines[#lines + 1] = 'description = ""'
-            lines[#lines + 1] = ""
-        end
-    end
+--             lines[#lines + 1] = "[[command]]"
+--             lines[#lines + 1] = "label = " .. toml_quote(app.label)
+--             lines[#lines + 1] = "cmd = " .. toml_quote(command)
+--             lines[#lines + 1] = 'description = ""'
+--             lines[#lines + 1] = ""
+--         end
+--     end
 
-    write_file(
-        CONFIG .. "/rama/coqui_config.toml",
-        table.concat(lines, "\n")
-    )
-end
+--     write_file(
+--         CONFIG .. "/rama/coqui_config.toml",
+--         table.concat(lines, "\n")
+--     )
+-- end
 
 -- ============================================================
 -- dwm configuration
@@ -914,8 +989,8 @@ end
 
 local function apply()
     create_directories()
-    generate_scripts()
-    generate_coqui()
+    -- generate_scripts()
+    -- generate_coqui()
     generate_dwm()
     generate_xinitrc()
 
@@ -924,10 +999,10 @@ local function apply()
         HOME .. "/.config/dwm/config.h"
     )
 
-    link(
-        CONFIG .. "/rama/coqui_config.toml",
-        HOME .. "/.config/rama/coqui_config.toml"
-    )
+    -- link(
+    --     CONFIG .. "/rama/coqui_config.toml",
+    --     HOME .. "/.config/rama/coqui_config.toml"
+    -- )
 
     log("Configuration applied.")
 end
@@ -967,10 +1042,6 @@ local function check()
 
     for _, path in ipairs({
         DWM_BIN,
-        COQUI_BIN,
-        BIN .. "/rama-coqui-launch",
-        BIN .. "/rama-power-menu",
-        BIN .. "/rama-logout",
     }) do
         if exists(path) then
             print("[OK]      " .. path)
@@ -982,7 +1053,6 @@ local function check()
 
     for _, path in ipairs({
         CONFIG .. "/dwm/config.h",
-        CONFIG .. "/rama/coqui_config.toml",
         HOME .. "/.xinitrc",
     }) do
         if exists(path) then
@@ -1058,13 +1128,40 @@ if action == "install" then
     install_packages()
     configure_system()
     install_rust()
-    build_dwm()
-    build_coqui()
+    build_all()
     apply()
 
     print("")
     log("Rama-OI installation completed.")
     print("Start the desktop with: startx")
+
+elseif action == "build" then
+    validate()
+
+    local force = false
+    local names = {}
+
+    for i = 2, #arg do
+        if arg[i] == "--force" then
+            force = true
+        else
+            names[#names + 1] = arg[i]
+        end
+    end
+
+    if #names == 0 or names[1] == "all" then
+        build_all(force)
+    else
+        for _, name in ipairs(names) do
+            build_from_github(name, force)
+        end
+    end
+
+    -- Refresh managed copies of source-owned config (dwm config.h).
+    apply()
+
+elseif action == "sources" then
+    list_sources()
 
 elseif action == "apply" then
     validate()
@@ -1083,6 +1180,8 @@ Rama-OI %s - Alpine Linux x86
 
 Usage:
     lua5.4 install_alpine.lua install
+    lua5.4 install_alpine.lua build [all|NAME...] [--force]
+    lua5.4 install_alpine.lua sources
     lua5.4 install_alpine.lua apply
     lua5.4 install_alpine.lua check
     lua5.4 install_alpine.lua uninstall
