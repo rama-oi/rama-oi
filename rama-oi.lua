@@ -515,6 +515,7 @@ local function build_dwm()
             fail(
                 "dwm source exists but is not a Git repository: "
                 .. DWM_DIR
+                .. "\nMove or remove it manually before retrying."
             )
         end
 
@@ -523,76 +524,65 @@ local function build_dwm()
         run({
             "git",
             "clone",
-            "--branch",
-            DWM_BRANCH,
             DWM_REPO,
             DWM_DIR,
         })
-    else
-        log("Updating Rama-OI dwm source")
-
-        run({
-            "git",
-            "-C",
-            DWM_DIR,
-            "fetch",
-            "origin",
-            DWM_BRANCH,
-        })
-
-        -- Do not overwrite locally modified tracked files.
-        local handle = io.popen(
-            "git -C " .. quote(DWM_DIR)
-            .. " status --porcelain"
-        )
-
-        local status = handle and handle:read("*a") or ""
-
-        if handle then
-            handle:close()
-        end
-
-        if status ~= "" then
-            fail(
-                "dwm source has local changes. Commit or back them up "
-                .. "before updating:\n" .. DWM_DIR
-            )
-        end
-
-        run({
-            "git",
-            "-C",
-            DWM_DIR,
-            "merge",
-            "--ff-only",
-            "origin/" .. DWM_BRANCH,
-        })
     end
+
+    log("Fetching latest Rama-OI dwm")
+
+    run({
+        "git",
+        "-C", DWM_DIR,
+        "fetch",
+        "origin",
+        "main",
+    })
+
+    log("Resetting dwm source to origin/main")
+    log("WARNING: Local changes inside " .. DWM_DIR .. " will be discarded")
+
+    run({
+        "git",
+        "-C", DWM_DIR,
+        "checkout",
+        "-B", "main",
+        "origin/main",
+    })
+
+    run({
+        "git",
+        "-C", DWM_DIR,
+        "reset",
+        "--hard",
+        "origin/main",
+    })
+
+    run({
+        "git",
+        "-C", DWM_DIR,
+        "clean",
+        "-fd",
+    })
 
     if not exists(DWM_DIR .. "/config.h") then
         fail(
             "Missing config.h in Rama-OI dwm repository.\n"
-            .. "Ensure your custom configuration is committed."
+            .. "Commit config.h to the main branch first."
         )
-    end
-
-    if not exists(DWM_DIR .. "/config.mk") then
-        fail("Missing config.mk in dwm source directory.")
     end
 
     log("Building Rama-OI dwm")
 
     run({
         "make",
-        "-C",
-        DWM_DIR,
+        "-C", DWM_DIR,
         "clean",
     })
 
     run({
         "make",
-        "-C",
-        DWM_DIR,
+        "-C", DWM_DIR,
     })
 
     mkdir(LOCAL_BIN)
@@ -601,14 +591,13 @@ local function build_dwm()
 
     run({
         "make",
-        "-C",
-        DWM_DIR,
+        "-C", DWM_DIR,
         "PREFIX=" .. HOME .. "/.local",
         "install",
     })
 
     if not exists(DWM_BIN) then
-        fail("dwm build completed but binary is missing: " .. DWM_BIN)
+        fail("dwm binary missing after installation: " .. DWM_BIN)
     end
 
     log("Rama-OI dwm installed: " .. DWM_BIN)
