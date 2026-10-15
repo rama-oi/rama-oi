@@ -78,7 +78,7 @@ local packages = {
         "caja",
         "dunst",
         "libnotify",
-        "mousepad",
+        "xsetroot",
     },
 
     build = {
@@ -104,6 +104,7 @@ local packages = {
         "less",
         "nano",
         "mc",
+        "mousepad",
         "tree",
         "unzip",
         "zip",
@@ -783,7 +784,7 @@ end
 
 local function generate_coqui()
     local lines = {
-        'theme = "nixos"',
+        'theme = "catppuccin-mocha"',
         "",
     }
 
@@ -863,6 +864,8 @@ local function generate_xinitrc()
 #!/bin/sh
 
 export PATH="$HOME/.local/bin:$PATH"
+
+xsetroot -solid "#89b4fa"
 
 # Start the session bus and dwm.
 exec dbus-run-session "$HOME/.local/bin/dwm"
