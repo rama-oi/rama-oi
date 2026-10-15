@@ -2,10 +2,10 @@
 
 -- ============================================================
 -- Rama-OI
--- Alpine Linux x86 (32-bit) | Minimal Xorg + i3 | Coqui
+-- Alpine Linux x86 (32-bit) | Minimal Xorg + dwm | Coqui
 -- ============================================================
 
-local VERSION = "1.1.0"
+local VERSION = "1.2.0"
 
 local HOME = assert(os.getenv("HOME"), "HOME is not set")
 local USER = assert(os.getenv("USER"), "USER is not set")
@@ -19,8 +19,14 @@ local LOCAL_BIN = HOME .. "/.local/bin"
 local COQUI_REPO = "https://github.com/rama-oi/coqui.git"
 local COQUI_REV = "cb4c3353f41d4a1c536cd927ad03338a7498d632"
 
+local DWM_REPO = "https://github.com/rama-oi/dwm.git"
+local DWM_BRANCH = "main"
+
 local COQUI_DIR = SRC .. "/coqui"
 local COQUI_BIN = BIN .. "/coqui"
+
+local DWM_DIR = SRC .. "/dwm"
+local DWM_BIN = LOCAL_BIN .. "/dwm"
 
 -- ============================================================
 -- Theme
@@ -64,8 +70,6 @@ local packages = {
         "xauth",
         "dbus",
         "dbus-x11",
-        "i3wm",
-        "i3status",
         "dmenu",
         "xterm",
         "font-dejavu",
@@ -85,11 +89,15 @@ local packages = {
         "pkgconf",
         "linux-headers",
         "libx11-dev",
-        "libxkbcommon-dev",
+        "libxft-dev",
+        "libxinerama-dev",
+        "freetype-dev",
         "openssl-dev",
         "zlib-dev",
         "rust",
         "cargo",
+        "make",
+        "gcc",
     },
 
     utilities = {
@@ -182,8 +190,8 @@ local applications = {
     },
     {
         category = "System",
-        label = "i3 Exit",
-        command = "i3-msg exit",
+        label = "Logout",
+        command = "rama-logout",
         terminal = false,
     },
     {
@@ -209,7 +217,9 @@ local function log(message)
 end
 
 local function fail(message)
-    io.stderr:write("\27[1;31mError:\27[0m " .. message .. "\n")
+    io.stderr:write(
+        "\27[1;31mError:\27[0m " .. message .. "\n"
+    )
     os.exit(1)
 end
 
@@ -248,7 +258,9 @@ local function run(args, quiet)
 end
 
 local function succeeds(command)
-    return os.execute(command .. " >/dev/null 2>&1") == true
+    return os.execute(
+        command .. " >/dev/null 2>&1"
+    ) == true
 end
 
 local function exists(path)
@@ -261,7 +273,9 @@ local function is_link(path)
 end
 
 local function read_link(path)
-    local handle = io.popen("readlink " .. quote(path) .. " 2>/dev/null")
+    local handle = io.popen(
+        "readlink " .. quote(path) .. " 2>/dev/null"
+    )
 
     if not handle then
         return nil
@@ -464,7 +478,7 @@ local function install_packages()
 end
 
 -- ============================================================
--- Rust toolchain: rustup + stable Rust + Cargo
+-- Rust toolchain
 -- ============================================================
 
 local function install_rust()
@@ -487,6 +501,117 @@ local function install_rust()
     run({ "rustc", "--version" })
 
     log("Rust toolchain is ready")
+end
+
+-- ============================================================
+-- dwm build and installation
+-- ============================================================
+
+local function build_dwm()
+    log("Preparing Rama-OI dwm source")
+
+    if not exists(DWM_DIR .. "/.git") then
+        if exists(DWM_DIR) then
+            fail(
+                "dwm source exists but is not a Git repository: "
+                .. DWM_DIR
+            )
+        end
+
+        mkdir(SRC)
+
+        run({
+            "git",
+            "clone",
+            "--branch",
+            DWM_BRANCH,
+            DWM_REPO,
+            DWM_DIR,
+        })
+    else
+        log("Updating Rama-OI dwm source")
+
+        run({
+            "git",
+            "-C",
+            DWM_DIR,
+            "fetch",
+            "origin",
+            DWM_BRANCH,
+        })
+
+        -- Do not overwrite locally modified tracked files.
+        local handle = io.popen(
+            "git -C " .. quote(DWM_DIR)
+            .. " status --porcelain"
+        )
+
+        local status = handle and handle:read("*a") or ""
+
+        if handle then
+            handle:close()
+        end
+
+        if status ~= "" then
+            fail(
+                "dwm source has local changes. Commit or back them up "
+                .. "before updating:\n" .. DWM_DIR
+            )
+        end
+
+        run({
+            "git",
+            "-C",
+            DWM_DIR,
+            "merge",
+            "--ff-only",
+            "origin/" .. DWM_BRANCH,
+        })
+    end
+
+    if not exists(DWM_DIR .. "/config.h") then
+        fail(
+            "Missing config.h in Rama-OI dwm repository.\n"
+            .. "Ensure your custom configuration is committed."
+        )
+    end
+
+    if not exists(DWM_DIR .. "/config.mk") then
+        fail("Missing config.mk in dwm source directory.")
+    end
+
+    log("Building Rama-OI dwm")
+
+    run({
+        "make",
+        "-C",
+        DWM_DIR,
+        "clean",
+    })
+
+    run({
+        "make",
+        "-C",
+        DWM_DIR,
+    })
+
+    mkdir(LOCAL_BIN)
+
+    log("Installing Rama-OI dwm")
+
+    run({
+        "make",
+        "-C",
+        DWM_DIR,
+        "PREFIX=" .. HOME .. "/.local",
+        "install",
+    })
+
+    if not exists(DWM_BIN) then
+        fail("dwm build completed but binary is missing: " .. DWM_BIN)
+    end
+
+    log("Rama-OI dwm installed: " .. DWM_BIN)
 end
 
 -- ============================================================
@@ -531,15 +656,10 @@ local function build_coqui()
         COQUI_REV,
     })
 
-    local cargo = "cargo"
-    local path = os.getenv("PATH") or ""
-
     log("Building Coqui in release mode")
 
     run({
-        "env",
-        "PATH=" .. path,
-        cargo,
+        "cargo",
         "build",
         "--release",
         "--manifest-path",
@@ -577,14 +697,12 @@ end
 local function create_directories()
     for _, path in ipairs({
         ROOT,
-        CONFIG .. "/i3",
-        CONFIG .. "/i3status",
+        CONFIG .. "/dwm",
         CONFIG .. "/rama",
         BIN,
         SRC,
         LOCAL_BIN,
-        HOME .. "/.config/i3",
-        HOME .. "/.config/i3status",
+        HOME .. "/.config/dwm",
         HOME .. "/.config/rama",
     }) do
         mkdir(path)
@@ -602,7 +720,10 @@ local function link(target, destination)
         if current and current:sub(1, #ROOT + 1) == ROOT .. "/" then
             run({ "rm", destination })
         else
-            fail("Refusing to replace unrelated symlink: " .. destination)
+            fail(
+                "Refusing to replace unrelated symlink: "
+                .. destination
+            )
         end
     elseif exists(destination) then
         fail(
@@ -639,10 +760,20 @@ choice=$(
 )
 
 case "$choice" in
-    Shutdown) poweroff ;;
-    Reboot)   reboot ;;
-    Logout)   i3-msg exit ;;
+    Shutdown) exec poweroff ;;
+    Reboot)   exec reboot ;;
+    Logout)   exec rama-logout ;;
 esac
+]=],
+        "0755"
+    )
+
+    write_file(
+        BIN .. "/rama-logout",
+        [=[
+#!/bin/sh
+# Exit the current X session.
+exec pkill -TERM -x dwm
 ]=],
         "0755"
     )
@@ -651,6 +782,7 @@ esac
         "coqui",
         "rama-coqui-launch",
         "rama-power-menu",
+        "rama-logout",
     }) do
         link(BIN .. "/" .. name, LOCAL_BIN .. "/" .. name)
     end
@@ -703,133 +835,32 @@ local function generate_coqui()
 end
 
 -- ============================================================
--- i3 configuration
+-- dwm configuration
 -- ============================================================
 
-local function generate_i3()
-    local c = theme.colors
+local function generate_dwm()
+    local config_path = DWM_DIR .. "/config.h"
+    local managed_config = CONFIG .. "/dwm/config.h"
 
-    local lines = {
-        "set $mod Mod4",
-        "",
-        ("font pango:%s %d"):format(theme.font.family, theme.font.size),
-        "",
-        "# Catppuccin Mocha",
-        ("client.focused          %s %s %s %s %s"):format(
-            c.accent, c.bg_alt, c.fg, c.accent, c.bg_alt
-        ),
-        ("client.unfocused        %s %s %s %s %s"):format(
-            c.bg, c.bg, c.muted, c.bg_alt, c.bg
-        ),
-        ("client.urgent           %s %s %s %s %s"):format(
-            c.danger, c.danger, c.bg_dark, c.danger, c.danger
-        ),
-        "",
-        "default_border pixel 1",
-        "default_floating_border pixel 1",
-        ("gaps inner %d"):format(theme.spacing.inner),
-        ("gaps outer %d"):format(theme.spacing.outer),
-        "",
-        "# Startup",
-        "exec --no-startup-id dunst",
-        "",
-        "# Application launcher",
-        "bindsym $mod+space exec --no-startup-id rama-coqui-launch",
-        "bindsym $mod+Return exec --no-startup-id xterm",
-        "bindsym $mod+d exec --no-startup-id dmenu_run",
-        "",
-        "# Window controls",
-        "bindsym $mod+Shift+q kill",
-        "bindsym $mod+Shift+c reload",
-        "bindsym $mod+Shift+r restart",
-        "bindsym $mod+Shift+e exec --no-startup-id rama-power-menu",
-        "",
-        "# Focus",
-        "bindsym $mod+h focus left",
-        "bindsym $mod+j focus down",
-        "bindsym $mod+k focus up",
-        "bindsym $mod+l focus right",
-        "",
-        "# Move containers",
-        "bindsym $mod+Shift+h move left",
-        "bindsym $mod+Shift+j move down",
-        "bindsym $mod+Shift+k move up",
-        "bindsym $mod+Shift+l move right",
-        "",
-        "# Floating terminal",
-        'for_window [class="^floating-terminal$"] floating enable, resize set 350 400, move position center',
-        "",
-        "# Workspaces",
-    }
-
-    for n = 1, 9 do
-        lines[#lines + 1] = (
-            "bindsym $mod+%d workspace number %d"
-        ):format(n, n)
-
-        lines[#lines + 1] = (
-            "bindsym $mod+Shift+%d move container to workspace number %d"
-        ):format(n, n)
+    if not exists(config_path) then
+        fail(
+            "Missing dwm config.h in source repository: "
+            .. config_path
+        )
     end
 
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = "bar {"
-    lines[#lines + 1] = "    position bottom"
-    lines[#lines + 1] = "    status_command i3status"
-    lines[#lines + 1] = "    colors {"
-    lines[#lines + 1] = "        background " .. c.bg
-    lines[#lines + 1] = "        statusline " .. c.fg
-    lines[#lines + 1] = "        separator " .. c.muted
-    lines[#lines + 1] = ("        focused_workspace %s %s %s"):format(
-        c.blue, c.blue, c.bg_dark
-    )
-    lines[#lines + 1] = ("        active_workspace %s %s %s"):format(
-        c.bg_alt, c.bg_alt, c.fg
-    )
-    lines[#lines + 1] = ("        inactive_workspace %s %s %s"):format(
-        c.bg, c.bg, c.muted
-    )
-    lines[#lines + 1] = ("        urgent_workspace %s %s %s"):format(
-        c.danger, c.danger, c.bg_dark
-    )
-    lines[#lines + 1] = "    }"
-    lines[#lines + 1] = "}"
+    -- The Rama-OI dwm repository owns config.h.
+    -- Keep a managed copy for inspection and linking.
+    local content = read_file(config_path)
 
-    write_file(CONFIG .. "/i3/config", table.concat(lines, "\n"))
-end
+    if not content then
+        fail("Cannot read dwm config.h: " .. config_path)
+    end
 
--- ============================================================
--- i3status configuration
--- ============================================================
+    write_file(managed_config, content)
 
-local function generate_i3status()
-    local c = theme.colors
-
-    write_file(CONFIG .. "/i3status/config", ([=[
-general {
-    colors = true
-    interval = 5
-    color_good = "%s"
-    color_degraded = "%s"
-    color_bad = "%s"
-}
-
-order += "cpu_usage"
-order += "memory"
-order += "tztime local"
-
-cpu_usage {
-    format = "CPU: %%usage"
-}
-
-memory {
-    format = "RAM: %%used"
-}
-
-tztime local {
-    format = "%%Y-%%m-%%d %%H:%%M"
-}
-]=]):format(c.success, c.warning, c.danger))
+    log("dwm config copied to " .. managed_config)
+    log("Theme and key bindings are defined by your dwm repository.")
 end
 
 -- ============================================================
@@ -846,7 +877,11 @@ local function generate_xinitrc()
 
     write_file(path, [=[
 #!/bin/sh
-exec dbus-run-session i3
+
+export PATH="$HOME/.local/bin:$PATH"
+
+# Start the session bus and dwm.
+exec dbus-run-session "$HOME/.local/bin/dwm"
 ]=], "0755")
 end
 
@@ -894,18 +929,12 @@ local function apply()
     create_directories()
     generate_scripts()
     generate_coqui()
-    generate_i3()
-    generate_i3status()
+    generate_dwm()
     generate_xinitrc()
 
     link(
-        CONFIG .. "/i3/config",
-        HOME .. "/.config/i3/config"
-    )
-
-    link(
-        CONFIG .. "/i3status/config",
-        HOME .. "/.config/i3status/config"
+        CONFIG .. "/dwm/config.h",
+        HOME .. "/.config/dwm/config.h"
     )
 
     link(
@@ -917,29 +946,30 @@ local function apply()
 end
 
 -- ============================================================
--- Validation
+-- Validation checks
 -- ============================================================
 
 local function check()
     local failed = false
 
-    local cargo_bin = HOME .. "/.cargo/bin"
-    local path = cargo_bin .. ":" .. (os.getenv("PATH") or "")
-
-    for _, command in ipairs({
+    local commands = {
         "lua5.4",
         "apk",
         "git",
-        "curl",
+        "make",
+        "cc",
         "cargo",
         "rustc",
         "xinit",
-        "i3",
-        "i3status",
+        "dmenu",
         "dmenu_run",
         "xterm",
         "dbus-run-session",
-    }) do
+        "dunst",
+        "pkill",
+    }
+
+    for _, command in ipairs(commands) do
         if succeeds("command -v " .. quote(command)) then
             print("[OK]      " .. command)
         else
@@ -948,29 +978,30 @@ local function check()
         end
     end
 
-    for _, command in ipairs({
-        cargo_bin .. "/cargo",
-        cargo_bin .. "/rustc",
+    for _, path in ipairs({
+        DWM_BIN,
         COQUI_BIN,
+        BIN .. "/rama-coqui-launch",
+        BIN .. "/rama-power-menu",
+        BIN .. "/rama-logout",
     }) do
-        if exists(command) then
-            print("[OK]      " .. command)
+        if exists(path) then
+            print("[OK]      " .. path)
         else
-            print("[MISSING] " .. command)
+            print("[MISSING] " .. path)
             failed = true
         end
     end
 
-    for _, path_to_check in ipairs({
-        CONFIG .. "/i3/config",
-        CONFIG .. "/i3status/config",
+    for _, path in ipairs({
+        CONFIG .. "/dwm/config.h",
         CONFIG .. "/rama/coqui_config.toml",
         HOME .. "/.xinitrc",
     }) do
-        if exists(path_to_check) then
-            print("[OK]      " .. path_to_check)
+        if exists(path) then
+            print("[OK]      " .. path)
         else
-            print("[MISSING] " .. path_to_check)
+            print("[MISSING] " .. path)
             failed = true
         end
     end
@@ -983,16 +1014,12 @@ local function check()
 end
 
 -- ============================================================
--- Uninstall managed configuration
+-- Uninstall managed links and configuration
 -- ============================================================
 
 local function uninstall()
     local links = {
-        { CONFIG .. "/i3/config", HOME .. "/.config/i3/config" },
-        {
-            CONFIG .. "/i3status/config",
-            HOME .. "/.config/i3status/config",
-        },
+        { CONFIG .. "/dwm/config.h", HOME .. "/.config/dwm/config.h" },
         {
             CONFIG .. "/rama/coqui_config.toml",
             HOME .. "/.config/rama/coqui_config.toml",
@@ -1005,6 +1032,10 @@ local function uninstall()
         {
             BIN .. "/rama-power-menu",
             LOCAL_BIN .. "/rama-power-menu",
+        },
+        {
+            BIN .. "/rama-logout",
+            LOCAL_BIN .. "/rama-logout",
         },
     }
 
@@ -1040,6 +1071,7 @@ if action == "install" then
     install_packages()
     configure_system()
     install_rust()
+    build_dwm()
     build_coqui()
     apply()
 

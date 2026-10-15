@@ -6,7 +6,7 @@ set -eu
 # Alpine Linux | x86 | Lua 5.4
 # ============================================================
 
-REPO="rama-oi/rama-x11"
+REPO="rama-oi/rama-oi"
 BRANCH="main"
 ARCHIVE="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
 
@@ -111,8 +111,8 @@ tar -xzf "$TMP/rama-oi.tar.gz" \
     -C "$TMP/repo" \
     --strip-components=1
 
-[ -f "$TMP/repo/install_alpine.lua" ] ||
-    die "install_alpine.lua was not found in the repository."
+[ -f "$TMP/repo/rama-oi.lua" ] ||
+    die "rama-oi.lua was not found in the repository."
 
 chmod -R a+rX "$TMP/repo"
 
@@ -125,7 +125,7 @@ log "Starting Rama-OI as $TARGET_USER"
 if [ "$MODE" = "root" ]; then
     # su starts a login session and picks up the user's new groups.
     su - "$TARGET_USER" -c \
-        "lua5.4 '$TMP/repo/install_alpine.lua' install"
+        "lua5.4 '$TMP/repo/rama-oi.lua' install"
 else
     if command -v doas >/dev/null 2>&1; then
         doas apk add --no-cache \
@@ -137,7 +137,7 @@ else
         die "Configure doas or sudo before running as a normal user."
     fi
 
-    lua5.4 "$TMP/repo/install_alpine.lua" install
+    lua5.4 "$TMP/repo/rama-oi.lua" install
 fi
 
 log "Rama-OI completed"

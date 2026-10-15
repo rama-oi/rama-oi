@@ -2,7 +2,10 @@
 
 ## Install:
 ```
-wget -O /tmp/install_alpine.sh https://raw.githubusercontent.com/rama-oi/rama-x11/main/install_alpine.sh
+setup-xorg-base
+setup-devd udev
 
-doas sh /tmp/install_alpine.sh
+wget -O /tmp/install.sh https://raw.githubusercontent.com/rama-oi/rama-oi/main/install.sh
+
+doas sh /tmp/install.sh
 ```
